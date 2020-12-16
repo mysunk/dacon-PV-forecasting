@@ -39,8 +39,8 @@ dataset = train.loc[:,x_col].values
 label = np.ravel(train.loc[:,y_col].values)
 
 FEATURES = len(x_col)
-past_history = 48*7
-future_target = 48*2
+past_history = 48 * 7
+future_target = 48 * 2
 
 ### transform train
 train_data, train_label = multivariate_data(dataset, label, 0,
@@ -95,9 +95,9 @@ rf = ensemble.RandomForestRegressor(n_estimators=N_ESTIMATORS,
 ## LOOCV
 sample_num = train_data.shape[0]
 loss_list = np.zeros([sample_num, 1])
-val_pred = [np.zeros(train_label.shape)] * 9
+val_pred = [np.zeros(train_label.shape) for _ in range(9)]
 from sklearn.model_selection import KFold
-kf = KFold(n_splits=10)
+kf = KFold(n_splits=10, shuffle=True)
 
 from tqdm import tqdm
 for train_index, test_index in tqdm(kf.split(train_data)):  # cross validation
