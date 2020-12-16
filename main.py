@@ -7,6 +7,9 @@ submission.set_index('id',inplace=True)
 
 train['D_sum'] = train['DHI'] + train['DNI']
 
+# save val result format
+save_num = 15
+
 #%% pre-processing
 def multivariate_data(dataset, target, start_index, end_index, history_size,
                       target_size, step, single_step=False):
@@ -33,22 +36,17 @@ x_col =[ 'DHI', 'DNI', 'WS', 'RH', 'T', 'D_sum', 'TARGET']
 y_col = ['TARGET']
 
 dataset = train.loc[:,x_col].values
-label = train.loc[:,y_col].values
+label = np.ravel(train.loc[:,y_col].values)
 
 FEATURES = len(x_col)
 past_history = 48*7
 future_target = 48*2
-STEP = 1
 
 ### transform train
-X_train, y_train = multivariate_data(dataset, label, 0,
+train_data, train_label = multivariate_data(dataset, label, 0,
                                                    None, past_history,
-                                                   future_target, STEP,
+                                                   future_target, 1,
                                                    single_step=False)
-TRAIN_SPLIT = int(X_train.shape[0] * 0.8)
-X_val, y_val = X_train[TRAIN_SPLIT:], y_train[TRAIN_SPLIT:]
-X_train, y_train = X_train[:TRAIN_SPLIT], y_train[:TRAIN_SPLIT]
-
 ### transform test
 test = []
 for i in range(81):
@@ -64,47 +62,72 @@ for i in range(81):
     test.append(data)
 test = np.concatenate(test, axis=0)
 
-X_train = X_train.transpose((0,2,1))
-X_val = X_val.transpose((0,2,1))
+## reshape from time series format to tabular format
+train_data = train_data.transpose((0,2,1))
+train_data = train_data.reshape(-1,past_history*FEATURES)
 test = test.transpose((0,2,1))
-
-X_train = X_train.reshape(-1,past_history*FEATURES)
-X_val = X_val.reshape(-1,past_history*FEATURES)
 test = test.reshape(-1,past_history*FEATURES)
 
 #%% rf model
-X_train = X_train.transpose((0,2,1))
-X_val = X_val.transpose((0,2,1))
-test = test.transpose((0,2,1))
+def pinball_loss(q,y_true, y_pred):
+    idx1 = y_true >= y_pred
+    idx2 = y_true < y_pred
 
-X_train = X_train.reshape(-1,past_history*FEATURES)
-X_val = X_val.reshape(-1,past_history*FEATURES)
-test = test.reshape(-1,past_history*FEATURES)
+    y_true_1, y_pred_1 = np.ravel(y_true[idx1]),np.ravel(y_pred[idx1])
+    y_true_2, y_pred_2 = np.ravel(y_true[idx2]),np.ravel(y_pred[idx2])
+
+    loss_1 = (y_true_1 - y_pred_1)*q
+    loss_2 = (y_pred_2 - y_true_2) * (1 - q)
+
+    loss = np.concatenate([loss_1, loss_2])
+    return np.mean(loss)
 
 from sklearn import ensemble
 N_ESTIMATORS = 1000
 rf = ensemble.RandomForestRegressor(n_estimators=N_ESTIMATORS,
-                                    min_samples_leaf=1, random_state=3,
-                                    verbose=True,
+                                    random_state=0,
+                                    max_depth = 10,
+                                    verbose=False,
+                                    max_features=1,
+                                    criterion= 'mae',
                                     n_jobs=-1)  # Use maximum number of cores.
 
-rf.fit(X_train, y_train)
+## LOOCV
+sample_num = train_data.shape[0]
+loss_list = np.zeros([sample_num, 1])
+val_pred = [np.zeros(train_label.shape)] * 9
+from sklearn.model_selection import KFold
+kf = KFold(n_splits=10)
 
-## val
-rf_preds = []
-for estimator in rf.estimators_:
-    rf_preds.append(estimator.predict(X_val))
-rf_preds = np.array(rf_preds)
+from tqdm import tqdm
+for train_index, test_index in tqdm(kf.split(train_data)):  # cross validation
+    X_train, X_test = train_data[train_index], train_data[test_index]
+    y_train, y_test = train_label[train_index], train_label[test_index]
 
+    rf.fit(X_train, y_train)
+
+    rf_preds = []
+    for estimator in rf.estimators_:
+        rf_preds.append(estimator.predict(X_test))
+    rf_preds = np.array(rf_preds)
+
+    for i, q in enumerate(np.arange(0.1, 1, 0.1)):
+        val_pred[i][test_index] = np.percentile(rf_preds, q * 100, axis=0)
+
+# val result dictionary and loss
 val_preds_df = pd.DataFrame(columns=list(submission.columns) + ['true'],
-                           data=np.zeros((y_val.shape[0] * future_target,10)))
-val_preds_df['true'] = np.ravel(y_val)
-
+                           data=np.zeros((train_label.shape[0] * future_target,10)))
+val_preds_df['true'] = np.ravel(train_label)
+losses = []
 for i, q in enumerate(np.arange(0.1, 1, 0.1)):
-    val_pred = np.percentile(rf_preds, q * 100, axis=0)
-    val_preds_df.iloc[:,i] = np.ravel(val_pred)
+    val_preds_df.iloc[:, i] = np.ravel(val_pred[i])
+    losses.append(pinball_loss(q, np.ravel(train_label), np.ravel(val_pred[i])))
+loss = np.mean(losses, axis=0)
+print(loss)
 
-## test
+#%% test == 전체 데이터셋 사용
+rf.fit(train_data, train_label)
+
 rf_preds = []
 for estimator in rf.estimators_:
     rf_preds.append(estimator.predict(test))
@@ -114,7 +137,15 @@ for i, q in enumerate(np.arange(0.1, 1, 0.1)):
     y_pred = np.percentile(rf_preds, q * 100, axis=0)
     submission.iloc[:, i] = np.ravel(y_pred)
 
-## save the result
-submission.to_csv('submit/submit_11.csv')
-# save corresponding val result
-val_preds_df.to_csv('val/val_11.csv')
+#%% save prediction and validation result
+submission.to_csv(f'submit/submit_{save_num}.csv')
+val_preds_df.to_csv(f'val/val_{save_num}.csv')
+
+f = open(f"val/val_{save_num}.txt","w+")
+msg = f'history length:: {past_history} \n'
+f.write(msg)
+msg = f'used feature:: {x_col} \n'
+f.write(msg)
+msg = f'pinball cv loss:: {loss} \n'
+f.write(msg)
+f.close()
