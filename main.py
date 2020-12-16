@@ -29,16 +29,19 @@ def multivariate_data(dataset, target, start_index, end_index, history_size,
         data = data.reshape(-1,history_size,1)
     return data, labels
 
-used_features =[ 'DHI', 'DNI', 'WS', 'RH', 'T', 'D_sum', 'TARGET']
-# used_features =['D_sum', 'TARGET']
-dataset = train.loc[:,used_features].values
-FEATURES = len(used_features)
+x_col =[ 'DHI', 'DNI', 'WS', 'RH', 'T', 'D_sum', 'TARGET']
+y_col = ['TARGET']
+
+dataset = train.loc[:,x_col].values
+label = train.loc[:,y_col].values
+
+FEATURES = len(x_col)
 past_history = 48*7
 future_target = 48*2
 STEP = 1
 
-### train
-X_train, y_train = multivariate_data(dataset, dataset[:, -1], 0,
+### transform train
+X_train, y_train = multivariate_data(dataset, label, 0,
                                                    None, past_history,
                                                    future_target, STEP,
                                                    single_step=False)
@@ -46,12 +49,13 @@ TRAIN_SPLIT = int(X_train.shape[0] * 0.8)
 X_val, y_val = X_train[TRAIN_SPLIT:], y_train[TRAIN_SPLIT:]
 X_train, y_train = X_train[:TRAIN_SPLIT], y_train[:TRAIN_SPLIT]
 
+### transform test
 test = []
 for i in range(81):
     data = []
     tmp = pd.read_csv(f'data/test/{i}.csv')
     tmp['D_sum'] = tmp['DHI'] + tmp['DNI']
-    tmp = tmp.loc[:, used_features].values
+    tmp = tmp.loc[:, x_col].values
     tmp = tmp[-past_history:,:]
     data.append(tmp)
     data = np.array(data)
@@ -110,30 +114,7 @@ for i, q in enumerate(np.arange(0.1, 1, 0.1)):
     y_pred = np.percentile(rf_preds, q * 100, axis=0)
     submission.iloc[:, i] = np.ravel(y_pred)
 
+## save the result
 submission.to_csv('submit/submit_11.csv')
 # save corresponding val result
 val_preds_df.to_csv('val/val_11.csv')
-
-#%% evaluation
-import tensorflow.keras.backend as K
-def pinball(tao, y_true, y_pred):
-    pin = K.mean(K.maximum(y_true - y_pred, 0) * tao +
-                 K.maximum(y_pred - y_true, 0) * (1 - tao))
-    return pin
-
-import matplotlib.pyplot as plt
-val_preds_df = pd.read_csv('val/val_11.csv')
-val_preds_df.set_index('Unnamed: 0',inplace=True)
-
-val_results = []
-val_preds_df[val_preds_df<0] = 0
-for q in np.arange(0.1,1,0.1):
-    val = pinball(q,val_preds_df['true'], val_preds_df['q_'+str(q)[:3]])
-    val_results.append(val)
-print(np.mean(val_results, axis=0))
-
-plt.plot(val_preds_df.iloc[:48,9],'r',label='True')
-for i in range(9):
-    plt.plot(val_preds_df.iloc[:48,i],'x',label=val_preds_df.columns[i])
-plt.legend()
-plt.show()
