@@ -8,7 +8,7 @@ submission.set_index('id',inplace=True)
 train['D_sum'] = train['DHI'] + train['DNI']
 
 # save val result format
-save_num = 19
+save_num = 20
 
 #%% pre-processing
 def multivariate_data(dataset, target, start_index, end_index, history_size,
@@ -32,14 +32,14 @@ def multivariate_data(dataset, target, start_index, end_index, history_size,
         data = data.reshape(-1,history_size,1)
     return data, labels
 
-x_col =[ 'DHI', 'DNI', 'WS', 'RH', 'T', 'D_sum', 'TARGET']
+x_col =['TARGET']
 y_col = ['TARGET']
 
 dataset = train.loc[:,x_col].values
 label = np.ravel(train.loc[:,y_col].values)
 
 FEATURES = len(x_col)
-past_history = 48 * 3
+past_history = 48 * 2
 future_target = 48 * 2
 
 ### transform train
@@ -77,12 +77,11 @@ def pinball_loss(q,y_true, y_pred):
     return np.mean(loss)
 
 from sklearn import ensemble
-N_ESTIMATORS = 10000
+N_ESTIMATORS = 1000
 rf = ensemble.RandomForestRegressor(n_estimators=N_ESTIMATORS,
                                     random_state=0,
-                                    max_depth = 2,
-                                    verbose=False,
-                                    criterion= 'mse',
+                                    max_depth = 5,
+                                    verbose=True,
                                     n_jobs=-1)  # Use maximum number of cores.
 
 ## LOOCV
