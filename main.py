@@ -8,7 +8,7 @@ submission.set_index('id',inplace=True)
 train['D_sum'] = train['DHI'] + train['DNI']
 
 # save val result format
-save_num = 15
+save_num = 19
 
 #%% pre-processing
 def multivariate_data(dataset, target, start_index, end_index, history_size,
@@ -20,7 +20,7 @@ def multivariate_data(dataset, target, start_index, end_index, history_size,
         end_index = len(dataset) - target_size
     for i in range(start_index, end_index, 48):
         indices = range(i-history_size, i, step)
-        data.append(dataset[indices])
+        data.append(np.ravel(dataset[indices].T))
         if single_step:
             labels.append(target[i+target_size])
         else:
@@ -39,7 +39,7 @@ dataset = train.loc[:,x_col].values
 label = np.ravel(train.loc[:,y_col].values)
 
 FEATURES = len(x_col)
-past_history = 48 * 7
+past_history = 48 * 3
 future_target = 48 * 2
 
 ### transform train
@@ -55,18 +55,12 @@ for i in range(81):
     tmp['D_sum'] = tmp['DHI'] + tmp['DNI']
     tmp = tmp.loc[:, x_col].values
     tmp = tmp[-past_history:,:]
-    data.append(tmp)
+    data.append(np.ravel(tmp.T))
     data = np.array(data)
     if FEATURES == 1:
         data = data.reshape(-1, past_history, 1)
     test.append(data)
 test = np.concatenate(test, axis=0)
-
-## reshape from time series format to tabular format
-train_data = train_data.transpose((0,2,1))
-train_data = train_data.reshape(-1,past_history*FEATURES)
-test = test.transpose((0,2,1))
-test = test.reshape(-1,past_history*FEATURES)
 
 #%% rf model
 def pinball_loss(q,y_true, y_pred):
@@ -83,13 +77,12 @@ def pinball_loss(q,y_true, y_pred):
     return np.mean(loss)
 
 from sklearn import ensemble
-N_ESTIMATORS = 1000
+N_ESTIMATORS = 10000
 rf = ensemble.RandomForestRegressor(n_estimators=N_ESTIMATORS,
                                     random_state=0,
-                                    max_depth = 10,
+                                    max_depth = 2,
                                     verbose=False,
-                                    max_features=1,
-                                    criterion= 'mae',
+                                    criterion= 'mse',
                                     n_jobs=-1)  # Use maximum number of cores.
 
 ## LOOCV
@@ -97,7 +90,7 @@ sample_num = train_data.shape[0]
 loss_list = np.zeros([sample_num, 1])
 val_pred = [np.zeros(train_label.shape) for _ in range(9)]
 from sklearn.model_selection import KFold
-kf = KFold(n_splits=10, shuffle=True)
+kf = KFold(n_splits=5, shuffle=True)
 
 from tqdm import tqdm
 for train_index, test_index in tqdm(kf.split(train_data)):  # cross validation
