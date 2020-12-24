@@ -27,19 +27,16 @@ def multivariate_data(dataset, target, start_index, end_index, history_size,
           labels.append(target[i:i+target_size])
     data = np.array(data)
     labels = np.array(labels)
-    if FEATURES == 1:
-        # univariate
-        data = data.reshape(-1,history_size,1)
     return data, labels
 
-x_col =['TARGET']
+x_col =['DHI','DNI','D_sum','WS','RH','T','TARGET']
 y_col = ['TARGET']
 
 dataset = train.loc[:,x_col].values
 label = np.ravel(train.loc[:,y_col].values)
 
 FEATURES = len(x_col)
-past_history = 48 * 2
+past_history = 48 * 3
 future_target = 48 * 2
 
 ### transform train
@@ -57,8 +54,6 @@ for i in range(81):
     tmp = tmp[-past_history:,:]
     data.append(np.ravel(tmp.T))
     data = np.array(data)
-    if FEATURES == 1:
-        data = data.reshape(-1, past_history, 1)
     test.append(data)
 test = np.concatenate(test, axis=0)
 
@@ -81,6 +76,8 @@ N_ESTIMATORS = 1000
 rf = ensemble.RandomForestRegressor(n_estimators=N_ESTIMATORS,
                                     random_state=0,
                                     max_depth = 5,
+                                    max_features=1,
+                                    criterion='mae',
                                     verbose=True,
                                     n_jobs=-1)  # Use maximum number of cores.
 
