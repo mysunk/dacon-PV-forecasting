@@ -46,19 +46,18 @@ def preprocess_data(data, target_lags=[48], weather_lags=[48], is_train=True):
 df_train = preprocess_data(train, target_lags=[48], weather_lags=[48], is_train=True)
 df_test = []
 
-for test_file in test_files:
-    temp = pd.read_csv(test_file)
+for i in range(81):
+    file_path = './data/test/' + str(i) + '.csv'
+    temp = pd.read_csv(file_path)
     temp = preprocess_data(temp, target_lags=[48], weather_lags=[48], is_train=False).iloc[-48:]
     df_test.append(temp)
 
 X_test = pd.concat(df_test)
-temp = pd.read_csv(test_files[0])
-preprocess_data(temp, target_lags=[48], weather_lags=[48], is_train=False).iloc[-48:].shape
 
 #%% model train
 from sklearn.model_selection import train_test_split
-X_train_1, X_valid_1, Y_train_1, Y_valid_1 = train_test_split(df_train.iloc[:, :-2], df_train.iloc[:, -2], test_size=0.3, random_state=0)
-X_train_2, X_valid_2, Y_train_2, Y_valid_2 = train_test_split(df_train.iloc[:, :-2], df_train.iloc[:, -1], test_size=0.3, random_state=0)
+X_train_1, X_valid_1, Y_train_1, Y_valid_1 = train_test_split(df_train.iloc[:, :-2], df_train.iloc[:, -2], test_size=0.3, shuffle=False)
+X_train_2, X_valid_2, Y_train_2, Y_valid_2 = train_test_split(df_train.iloc[:, :-2], df_train.iloc[:, -1], test_size=0.3, shuffle=False)
 
 quantiles = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 
@@ -96,6 +95,8 @@ def train_data(X_train, Y_train, X_valid, Y_valid, X_test):
 # Target1
 models_1, results_1 = train_data(X_train_1, Y_train_1, X_valid_1, Y_valid_1, X_test)
 results_1.sort_index()[:48]
+
+y_pred = models_1[4].predict(X_valid_1)
 
 # Target2
 models_2, results_2 = train_data(X_train_2, Y_train_2, X_valid_2, Y_valid_2, X_test)
