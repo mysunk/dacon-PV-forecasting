@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 WINDOW_SIZE = 48
+RS = 1
 
 #%% 1. load dataset
 # train dataset
@@ -80,38 +81,34 @@ def pinball_loss(y_true, y_pred, q):
 
 # train-val split
 tr_list, val_list, tr_label_list, val_label_list = \
-    train_test_split(train_list, train_label_list,test_size = 0.2, random_state = 4)
+    train_test_split(train_list, train_label_list,test_size = 0.2, random_state = RS)
 
 # transform with weather features
 # WEATHER_FEATURES = ['D_sum','WS','RH','T']
 # feature_weight = [0.4, 0.2, 0.2, 0.2]
 WEATHER_FEATURES = ['TARGET']
 feature_weight = [1]
-weather_noem = True
+weather_noem = False
 lags = 2
 train_w = transform(tr_list, features=WEATHER_FEATURES,feature_weight = feature_weight, lags=lags, norm = weather_noem)
 val_w = transform(val_list, features=WEATHER_FEATURES,feature_weight = feature_weight, lags=lags, norm = weather_noem)
 test_w = transform(test_list, features=WEATHER_FEATURES,feature_weight = feature_weight, lags=lags, norm = weather_noem)
 
-# clustering
+#%% 2-2. clustering phase 1 : train
 db_index, s_index = [], []
 for num_clusters in range(2, 10):
     kmeans = KMeans(n_clusters = num_clusters, random_state=0)
     kmeans.fit(train_w)
     train_cluster_label = kmeans.labels_
-    val_cluster_label = kmeans.predict(val_w)
-    test_cluster_label = kmeans.predict(test_w)
     print('DB index: {:.2f}'.format(davies_bouldin_score(train_w, kmeans.labels_)))
     db_index.append(davies_bouldin_score(train_w, kmeans.labels_))
     print('Silhouette index: {:.2f}'.format(silhouette_samples(train_w, kmeans.labels_).mean()))
     s_index.append(silhouette_samples(train_w, kmeans.labels_).mean())
-    # print(np.unique(train_cluster_label, return_counts=True))
-# del train_w, val_w
 plt.plot(db_index)
 plt.plot(s_index)
 plt.show()
 
-#%% 2-2. clustering
+#%% 2-2. clustering phase 1 : test
 num_clusters = 2
 kmeans = KMeans(n_clusters = num_clusters, random_state=0)
 kmeans.fit(train_w)
@@ -121,6 +118,30 @@ test_cluster_label = kmeans.predict(test_w)
 print('DB index: {:.2f}'.format(davies_bouldin_score(train_w, kmeans.labels_)))
 print('Silhouette index: {:.2f}'.format(silhouette_samples(train_w, kmeans.labels_).mean()))
 print(np.unique(train_cluster_label, return_counts=True))
+
+#%% 2-3. clustering phase 2 : train
+db_index, s_index = [], []
+for num_clusters in range(2, 10):
+    train_w_sub = train_w[kmeans.labels_ == 0]
+    kmeans_2 = KMeans(n_clusters=num_clusters, random_state=0)
+    kmeans_2.fit(train_w_sub)
+    train_cluster_label = kmeans_2.labels_
+    print('DB index: {:.2f}'.format(davies_bouldin_score(train_w_sub, kmeans_2.labels_)))
+    db_index.append(davies_bouldin_score(train_w_sub, kmeans_2.labels_))
+    print('Silhouette index: {:.2f}'.format(silhouette_samples(train_w_sub, kmeans_2.labels_).mean()))
+    s_index.append(silhouette_samples(train_w_sub, kmeans_2.labels_).mean())
+plt.plot(db_index)
+plt.plot(s_index)
+plt.show()
+
+#%% 2-3. clustering phase 2 : test
+num_clusters_2 = 4
+kmeans_2 = KMeans(n_clusters = num_clusters, random_state=0)
+train_w_sub = train_w[kmeans.labels_ == 0]
+kmeans_2.fit(train_w_sub)
+train_cluster_label_2 = kmeans_2.labels_
+val_cluster_label_2 = kmeans_2.predict(val_w[val_cluster_label == 0])
+print(np.unique(train_cluster_label_2, return_counts=True))
 
 #%% 3. clustering based forecasting
 def transform(data_list, features, lags = 7, norm = False):
@@ -155,62 +176,77 @@ rf_global.fit(train_arr, train_label_arr)
 cluster_mae, globel_mae = [], []
 for i in range(num_clusters):
     print(f'For cluster {i}')
-    # filter data
-    train_arr_filtered = train_arr[train_cluster_label == i,:]
-    train_label_arr_filtered = train_label_arr[train_cluster_label == i, :]
-    val_arr_filtered = val_arr[val_cluster_label == i, :]
-    val_label_arr_filtered = val_label_arr[val_cluster_label == i, :]
+    for j in range(num_clusters_2):
+        if i == 1:
+            # filter data
+            train_arr_filtered = train_arr[train_cluster_label == i, :]
+            train_label_arr_filtered = train_label_arr[train_cluster_label == i, :]
+            val_arr_filtered = val_arr[val_cluster_label == i, :]
+            val_label_arr_filtered = val_label_arr[val_cluster_label == i, :]
+        elif i==0:
+            train_arr_filtered = train_arr[train_cluster_label == i, :][train_cluster_label_2 == j]
+            train_label_arr_filtered = train_label_arr[train_cluster_label == i, :][train_cluster_label_2 == j]
+            val_arr_filtered = val_arr[val_cluster_label == i, :][val_cluster_label_2 == j]
+            val_label_arr_filtered = val_label_arr[val_cluster_label == i, :][val_cluster_label_2 == j]
 
-    # clustering based forecasting
-    rf = RandomForestRegressor(**rf_param)
-    rf.fit(train_arr_filtered, train_label_arr_filtered)
+        print('number of train samples: {}'.format(train_arr_filtered.shape[0]))
 
-    rf_preds = []
-    for estimator in rf.estimators_:
-        rf_preds.append(estimator.predict(val_arr_filtered))
-    rf_preds = np.array(rf_preds)
+        # predict
+        rf = RandomForestRegressor(**rf_param)
+        rf.fit(train_arr_filtered, train_label_arr_filtered)
 
-    rf_preds_1 = []
-    for i, q in enumerate(np.arange(0.1, 1, 0.1)):
-        y_pred = np.percentile(rf_preds, q * 100, axis=0)
-        rf_preds_1.append(y_pred)
+        ### clustering based forecasting
+        rf_preds = []
+        for estimator in rf.estimators_:
+            val_pred_2 = estimator.predict(val_arr_filtered)
+            if is_norm:
+                val_pred_2 = denormalize(val_pred_2)
+            rf_preds.append(val_pred_2)
+        rf_preds = np.array(rf_preds)
 
-    # compare with global predict
-    rf_preds = []
-    for estimator in rf_global.estimators_:
-        rf_preds.append(estimator.predict(val_arr_filtered))
-    rf_preds = np.array(rf_preds)
+        rf_preds_1 = []
+        for i, q in enumerate(np.arange(0.1, 1, 0.1)):
+            y_pred = np.percentile(rf_preds, q * 100, axis=0)
+            rf_preds_1.append(y_pred)
 
-    rf_preds_2 = []
-    for i, q in enumerate(np.arange(0.1, 1, 0.1)):
-        y_pred = np.percentile(rf_preds, q * 100, axis=0)
-        rf_preds_2.append(y_pred)
+        ### compare with global predict
+        rf_preds = []
+        for estimator in rf_global.estimators_:
+            val_pred_1 = estimator.predict(val_arr_filtered)
+            if is_norm:
+                val_pred_1 = denormalize(val_pred_1)
+            rf_preds.append(val_pred_1)
+        rf_preds = np.array(rf_preds)
 
-    # mae
-    if is_norm:
-        val_label_arr_filtered = denormalize(val_label_arr_filtered)
-        # FIXME
-        val_pred_1 = denormalize(val_pred_1)
-        val_pred_2 = denormalize(val_pred_2)
+        rf_preds_2 = []
+        for i, q in enumerate(np.arange(0.1, 1, 0.1)):
+            y_pred = np.percentile(rf_preds, q * 100, axis=0)
+            rf_preds_2.append(y_pred)
 
-    losses_1, losses_2 = [], []
-    for i, q in enumerate(np.arange(0.1, 1, 0.1)):
-        loss1 = pinball_loss(val_label_arr_filtered, rf_preds_1[i], q)
-        loss2 = pinball_loss(val_label_arr_filtered, rf_preds_2[i], q)
-        losses_1.append(loss1)
-        losses_2.append(loss2)
+        if is_norm:
+            val_label_arr_filtered = denormalize(val_label_arr_filtered)
 
-    mae_1, mae_2 = np.mean(losses_1), np.mean(losses_1)
-    print('clustering based:{:.2f}'.format(np.mean(losses_1)))
-    print('global:{:.2f}'.format(np.mean(losses_2)))
-    if mae_1 > mae_2:
-        mae_1 = mae_2
-    cluster_mae.append(mae_1)
-    globel_mae.append(mae_2)
+        losses_1, losses_2 = [], []
+        for i, q in enumerate(np.arange(0.1, 1, 0.1)):
+            loss1 = pinball_loss(val_label_arr_filtered, rf_preds_1[i], q)
+            loss2 = pinball_loss(val_label_arr_filtered, rf_preds_2[i], q)
+            losses_1.append(loss1)
+            losses_2.append(loss2)
 
-print('Total')
-counts = np.unique(train_cluster_label, return_counts=True)[1] / np.unique(train_cluster_label, return_counts=True)[1].sum()
-print('clustering based:{:.2f}'.format(np.dot(cluster_mae, counts)))
-print('global:{:.2f}'.format(np.dot(globel_mae, counts)))
+        mae_1, mae_2 = np.mean(losses_1), np.mean(losses_2)
+        print('clustering based:{:.2f}'.format(np.mean(losses_1)))
+        print('global:{:.2f}'.format(np.mean(losses_2)))
+        if mae_1 > mae_2:
+            mae_1 = mae_2
+        cluster_mae.append(mae_1)
+        globel_mae.append(mae_2)
 
-label_counts = np.unique(train_cluster_label, return_counts=True)[1]
+        if i == 1:
+            break
+
+# print('Total')
+# counts = np.unique(train_cluster_label, return_counts=True)[1] / np.unique(train_cluster_label, return_counts=True)[1].sum()
+# print('clustering based:{:.2f}'.format(np.dot(cluster_mae, counts)))
+# print('global:{:.2f}'.format(np.dot(globel_mae, counts)))
+#
+# label_counts = np.unique(train_cluster_label, return_counts=True)[1]
